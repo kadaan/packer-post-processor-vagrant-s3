@@ -29,7 +29,7 @@ type Config struct {
 	BoxName      string `mapstructure:"box_name"`
 	BoxDir       string `mapstructure:"box_dir"`
 	Version      string `mapstructure:"version"`
-	ACL          s3.ACL `mapstructure:"acl"`
+	ACL          string `mapstructure:"acl"`
 
 	common.PackerConfig    `mapstructure:",squash"`
 	awscommon.AccessConfig `mapstructure:",squash"`
@@ -168,7 +168,7 @@ func (p *PostProcessor) PostProcess(ui packer.Ui, artifact packer.Artifact) (pac
 	if size > 100*1024*1024 {
 		ui.Message("File size > 100MB. Initiating multipart upload")
 
-		multi, err := p.s3.InitMulti(boxPath, "application/octet-stream", p.config.ACL)
+		multi, err := p.s3.InitMulti(boxPath, "application/octet-stream", s3.ACL(p.config.ACL))
 		if err != nil {
 			return nil, false, err
 		}
@@ -226,7 +226,7 @@ func (p *PostProcessor) PostProcess(ui packer.Ui, artifact packer.Artifact) (pac
 			return nil, false, err
 		}
 	} else {
-		if err := p.s3.PutReader(boxPath, file, size, "application/octet-stream", p.config.ACL); err != nil {
+		if err := p.s3.PutReader(boxPath, file, size, "application/octet-stream", s3.ACL(p.config.ACL)); err != nil {
 			return nil, false, err
 		}
 	}
@@ -261,7 +261,7 @@ func (p *PostProcessor) putManifest(manifest *Manifest) error {
 	if err := json.NewEncoder(&buf).Encode(manifest); err != nil {
 		return err
 	}
-	if err := p.s3.Put(p.config.ManifestPath, buf.Bytes(), "application/json", p.config.ACL); err != nil {
+	if err := p.s3.Put(p.config.ManifestPath, buf.Bytes(), "application/json", s3.ACL(p.config.ACL)); err != nil {
 		return err
 	}
 	return nil
