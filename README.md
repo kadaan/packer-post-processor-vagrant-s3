@@ -8,7 +8,7 @@ Installation
 Install the binary (you'll need ```git``` and ```go```):
  
 ```
-$ go get github.com/lmars/packer-post-processor-vagrant-s3
+$ go get github.com/kadaan/packer-post-processor-vagrant-s3
 ```
 Copy the plugin into packer.d directory:
 

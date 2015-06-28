@@ -15,7 +15,9 @@ import (
 	"github.com/mitchellh/goamz/s3"
 	awscommon "github.com/mitchellh/packer/builder/amazon/common"
 	"github.com/mitchellh/packer/common"
+	"github.com/mitchellh/packer/helper/config"
 	"github.com/mitchellh/packer/packer"
+	"github.com/mitchellh/packer/template/interpolate"
 )
 
 type Config struct {
@@ -28,7 +30,8 @@ type Config struct {
 
 	common.PackerConfig    `mapstructure:",squash"`
 	awscommon.AccessConfig `mapstructure:",squash"`
-	tpl                    *packer.ConfigTemplate
+
+	ctx interpolate.Context
 }
 
 type PostProcessor struct {
@@ -37,20 +40,20 @@ type PostProcessor struct {
 }
 
 func (p *PostProcessor) Configure(raws ...interface{}) error {
-	_, err := common.DecodeConfig(&p.config, raws...)
+	err := config.Decode(&p.config, &config.DecodeOpts{
+		Interpolate:        true,
+		InterpolateContext: &p.config.ctx,
+		InterpolateFilter: &interpolate.RenderFilter{
+			Exclude: []string{},
+		},
+	}, raws...)
 	if err != nil {
 		return err
 	}
-
-	p.config.tpl, err = packer.NewConfigTemplate()
-	if err != nil {
-		return err
-	}
-	p.config.tpl.UserVars = p.config.PackerUserVars
 
 	errs := &packer.MultiError{}
 
-	errs = packer.MultiErrorAppend(errs, p.config.AccessConfig.Prepare(p.config.tpl)...)
+	errs = packer.MultiErrorAppend(errs, p.config.AccessConfig.Prepare(&p.config.ctx)...)
 
 	// required configuration
 	templates := map[string]*string{
@@ -62,22 +65,22 @@ func (p *PostProcessor) Configure(raws ...interface{}) error {
 		"version":  &p.config.Version,
 	}
 
-	for key, ptr := range templates {
-		if *ptr == "" {
-			errs = packer.MultiErrorAppend(errs, fmt.Errorf("vagrant-s3 %s must be set", key))
-		}
-	}
-
 	// Template process
 	for key, ptr := range templates {
-		*ptr, err = p.config.tpl.Process(*ptr, nil)
+		if *ptr == "" {
+			errs = packer.MultiErrorAppend(
+				errs, fmt.Errorf("%s must be set", key))
+		}
+
+		*ptr, err = interpolate.Render(*ptr, &p.config.ctx)
 		if err != nil {
-			errs = packer.MultiErrorAppend(errs, fmt.Errorf("Error processing %s: %s", key, err))
+			errs = packer.MultiErrorAppend(
+				errs, fmt.Errorf("Error processing %s: %s", key, err))
 		}
 	}
 
 	// setup the s3 bucket
-	auth, err := p.config.AccessConfig.Auth()
+	auth, err := aws.GetAuth(p.config.AccessConfig.AccessKey, p.config.AccessConfig.SecretKey)
 	if err != nil {
 		errs = packer.MultiErrorAppend(errs, err)
 	}
