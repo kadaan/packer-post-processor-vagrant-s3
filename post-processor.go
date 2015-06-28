@@ -29,7 +29,7 @@ type Config struct {
 	BoxName      string `mapstructure:"box_name"`
 	BoxDir       string `mapstructure:"box_dir"`
 	Version      string `mapstructure:"version"`
-	ACL          string `mapstructure:"acl"`
+	ACL          s3.ACL `mapstructure:"acl"`
 
 	common.PackerConfig    `mapstructure:",squash"`
 	awscommon.AccessConfig `mapstructure:",squash"`
