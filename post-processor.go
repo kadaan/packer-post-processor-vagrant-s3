@@ -104,15 +104,17 @@ func (p *PostProcessor) Configure(raws ...interface{}) error {
 }
 
 func (p *PostProcessor) PostProcess(ui packer.Ui, artifact packer.Artifact) (packer.Artifact, bool, error) {
-	// Only accept input from the vagrant post-processor
-	if artifact.BuilderId() != "mitchellh.post-processor.vagrant" {
-		return nil, false, fmt.Errorf("Unknown artifact type, requires box from vagrant post-processor: %s", artifact.BuilderId())
+	if len(artifact.Files()) == 0 {
+		return nil, false, fmt.Errorf("No files in artifact from %s post-processor", artifact.BuilderId())
 	}
 
-	// Assume there is only one .box file to upload
+	if len(artifact.Files()) > 1 {
+		return nil, false, fmt.Errorf("More than one file in artifact from %s post-processor: %s", artifact.BuilderId(), artifact.Files())
+	}
+
 	box := artifact.Files()[0]
 	if !strings.HasSuffix(box, ".box") {
-		return nil, false, fmt.Errorf("Unknown files in artifact from vagrant post-processor: %s", artifact.Files())
+		return nil, false, fmt.Errorf("Unknown file in artifact from %s post-processor: %s", artifact.BuilderId(), artifact.Files())
 	}
 
 	provider := providerFromBuilderName(artifact.Id())
@@ -133,38 +135,10 @@ func (p *PostProcessor) PostProcess(ui packer.Ui, artifact packer.Artifact) (pac
 	size := info.Size()
 	ui.Message(fmt.Sprintf("Box to upload: %s (%d bytes)", box, size))
 
-	// get the latest manifest so we can add to it
-	ui.Message("Fetching latest manifest")
-	manifest, err := p.getManifest()
-	if err != nil {
-		return nil, false, err
-	}
-
 	// generate the path to store the box in S3
 	boxPath := fmt.Sprintf("%s/%s/%s", p.config.BoxDir, p.config.Version, path.Base(box))
 
-	ui.Message("Generating checksum")
-	checksum, err := sum256(file)
-	if err != nil {
-		return nil, false, err
-	}
-	ui.Message(fmt.Sprintf("Checksum is %s", checksum))
-
-	ui.Message(fmt.Sprintf("Adding %s %s box to manifest", provider, p.config.Version))
-	if err := manifest.add(p.config.Version, &Provider{
-		Name:         provider,
-		Url:          p.s3.URL(boxPath),
-		ChecksumType: "sha256",
-		Checksum:     checksum,
-	}); err != nil {
-		return nil, false, err
-	}
-
-	// upload the box to S3 (rewinding as we already read the file to generate the checksum)
-	ui.Message(fmt.Sprintf("Uploading box to S3: %s", boxPath))
-	if _, err := file.Seek(0, 0); err != nil {
-		return nil, false, err
-	}
+	// upload the box to S3 
 	if size > 100*1024*1024 {
 		ui.Message("File size > 100MB. Initiating multipart upload")
 
@@ -229,6 +203,36 @@ func (p *PostProcessor) PostProcess(ui packer.Ui, artifact packer.Artifact) (pac
 		if err := p.s3.PutReader(boxPath, file, size, "application/octet-stream", s3.ACL(p.config.ACL)); err != nil {
 			return nil, false, err
 		}
+	}
+
+	// Rewinding as we already read the file to generate the checksum
+	ui.Message(fmt.Sprintf("Uploading box to S3: %s", boxPath))
+	if _, err := file.Seek(0, 0); err != nil {
+		return nil, false, err
+	}
+
+	ui.Message("Generating checksum")
+	checksum, err := sum256(file)
+	if err != nil {
+		return nil, false, err
+	}
+	ui.Message(fmt.Sprintf("Checksum is %s", checksum))
+
+	// get the latest manifest so we can add to it
+	ui.Message("Fetching latest manifest")
+	manifest, err := p.getManifest()
+	if err != nil {
+		return nil, false, err
+	}
+
+	ui.Message(fmt.Sprintf("Adding %s %s box to manifest", provider, p.config.Version))
+	if err := manifest.add(p.config.Version, &Provider{
+		Name:         provider,
+		Url:          p.s3.URL(boxPath),
+		ChecksumType: "sha256",
+		Checksum:     checksum,
+	}); err != nil {
+		return nil, false, err
 	}
 
 	ui.Message(fmt.Sprintf("Uploading the manifest: %s", p.config.ManifestPath))
